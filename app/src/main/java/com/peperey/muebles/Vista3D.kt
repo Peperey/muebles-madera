@@ -151,7 +151,7 @@ fun DrawScope.dibujarVista3D(
         isAntiAlias = true
         isFakeBoldText = true
         textAlign = android.graphics.Paint.Align.CENTER
-        color = if (colorBase.luminance() < 0.45f) {
+        color = if ((0.2126f * colorBase.red + 0.7152f * colorBase.green + 0.0722f * colorBase.blue) < 0.45f) {
             android.graphics.Color.WHITE
         } else {
             android.graphics.Color.BLACK
