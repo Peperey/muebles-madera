@@ -61,11 +61,12 @@ data class Pieza(
         get() = anchoCm * altoCm * grosorCm / 1_000_000f * cantidad
 }
 
-enum class Madera(val etiqueta: String, val color: Color) {
-    PINO("Pino", Color(0xFFE3C08D)),
-    ROBLE("Roble", Color(0xFFB08850)),
-    NOGAL("Nogal", Color(0xFF6B4A2B)),
-    HAYA("Haya", Color(0xFFF0D2A8))
+// precioM3: precio de ejemplo en euros por metro cúbico. Cámbialo por el de tu zona.
+enum class Madera(val etiqueta: String, val color: Color, val precioM3: Double) {
+    PINO("Pino", Color(0xFFE3C08D), 300.0),
+    ROBLE("Roble", Color(0xFFB08850), 900.0),
+    NOGAL("Nogal", Color(0xFF6B4A2B), 1100.0),
+    HAYA("Haya", Color(0xFFF0D2A8), 500.0)
 }
 
 private const val PREFS = "muebles_prefs"
@@ -149,6 +150,7 @@ fun DisenoMueblesScreen() {
     }
 
     val volumenTotal = piezas.sumOf { it.volumenM3.toDouble() }
+    val costeTotal = volumenTotal * madera.precioM3
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -169,6 +171,10 @@ fun DisenoMueblesScreen() {
                     )
                 }
             }
+            Text(
+                "${madera.etiqueta}: ${madera.precioM3.toInt()} € por m³ (precio de ejemplo)",
+                style = MaterialTheme.typography.bodySmall
+            )
         }
 
         item {
@@ -263,7 +269,8 @@ fun DisenoMueblesScreen() {
 
         item {
             Text(
-                "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³",
+                "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³  ·  " +
+                    "Coste: ${"%.2f".format(costeTotal)} €",
                 style = MaterialTheme.typography.bodyLarge
             )
         }
@@ -276,6 +283,10 @@ fun DisenoMueblesScreen() {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(p.nombre, style = MaterialTheme.typography.titleSmall)
                     Text("${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · ${p.cantidad} ud.")
+                    Text(
+                        "Coste: ${"%.2f".format(p.volumenM3 * madera.precioM3)} €",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
                 OutlinedButton(onClick = { piezas.removeAt(indice) }) {
                     Text("Quitar")
