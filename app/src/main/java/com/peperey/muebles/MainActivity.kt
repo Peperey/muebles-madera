@@ -143,7 +143,7 @@ fun llamarGroq(clave: String, descripcion: String): String {
     val sistema = """Eres un diseñador de muebles de madera. Responde SOLO con un array JSON, sin texto ni markdown. Cada elemento es una pieza con las claves: "nombre" (texto), "ancho", "alto", "grosor" (números en cm), "cantidad" (entero), "orientacion" ("DE_PIE", "DE_LADO" o "TUMBADA"), "x", "y", "z" (posición en cm de la esquina inferior izquierda de la pieza). Significado de la orientación: DE_PIE tiene ancho en X, alto en Y y grosor en Z. DE_LADO tiene grosor en X, alto en Y y ancho en Z. TUMBADA tiene ancho en X, grosor en Y y alto en Z. Las piezas no deben solaparse entre sí. Usa grosores de 1.8 a 2 cm para tableros. Todas las medidas son positivas."""
 
     val cuerpo = JSONObject().apply {
-        put("model", "llama-3.3-70b-versatile")
+        put("model", "openai/gpt-oss-120b")
         put("temperature", 0.2)
         put(
             "messages",
