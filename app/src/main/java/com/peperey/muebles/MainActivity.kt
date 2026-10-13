@@ -102,6 +102,35 @@ fun seSolapan(a: Pieza, b: Pieza, eps: Float = 0.01f): Boolean =
         a.y < b.y + b.dy - eps && b.y < a.y + a.dy - eps &&
         a.z < b.z + b.dz - eps && b.z < a.z + a.dz - eps
 
+// Plantilla: estantería con laterales, base, techo y baldas repartidas a la misma distancia
+fun plantillaEstanteria(ancho: Float, alto: Float, fondo: Float, grosor: Float, baldas: Int): List<Pieza> {
+    val t = grosor
+    val piezas = mutableListOf<Pieza>()
+    piezas += Pieza("Lateral izquierdo", fondo, alto, t, 1, Orientacion.DE_LADO, 0f, 0f, 0f)
+    piezas += Pieza("Lateral derecho", fondo, alto, t, 1, Orientacion.DE_LADO, ancho - t, 0f, 0f)
+    piezas += Pieza("Base", ancho - 2 * t, fondo, t, 1, Orientacion.TUMBADA, t, 0f, 0f)
+    piezas += Pieza("Techo", ancho - 2 * t, fondo, t, 1, Orientacion.TUMBADA, t, alto - t, 0f)
+    val libre = alto - 2 * t - baldas * t
+    val hueco = libre / (baldas + 1)
+    for (i in 1..baldas) {
+        val y = t + i * hueco + (i - 1) * t
+        piezas += Pieza("Balda $i", ancho - 2 * t, fondo, t, 1, Orientacion.TUMBADA, t, y, 0f)
+    }
+    return piezas
+}
+
+// Plantilla: mesa con tablero y cuatro patas cuadradas de 5 cm
+fun plantillaMesa(ancho: Float, fondo: Float, alto: Float, grosor: Float): List<Pieza> {
+    val pata = 5f
+    return listOf(
+        Pieza("Tablero", ancho, fondo, grosor, 1, Orientacion.TUMBADA, 0f, alto - grosor, 0f),
+        Pieza("Pata 1", pata, alto - grosor, pata, 1, Orientacion.DE_PIE, 0f, 0f, 0f),
+        Pieza("Pata 2", pata, alto - grosor, pata, 1, Orientacion.DE_PIE, ancho - pata, 0f, 0f),
+        Pieza("Pata 3", pata, alto - grosor, pata, 1, Orientacion.DE_PIE, 0f, 0f, fondo - pata),
+        Pieza("Pata 4", pata, alto - grosor, pata, 1, Orientacion.DE_PIE, ancho - pata, 0f, fondo - pata)
+    )
+}
+
 data class Proyeccion(
     val h0: Float,
     val h1: Float,
@@ -241,6 +270,11 @@ fun DisenoMueblesScreen() {
     var py by remember { mutableStateOf("0") }
     var pz by remember { mutableStateOf("0") }
     var cantidad by remember { mutableStateOf("1") }
+    var tAncho by remember { mutableStateOf("") }
+    var tAlto by remember { mutableStateOf("") }
+    var tFondo by remember { mutableStateOf("") }
+    var tGrosor by remember { mutableStateOf("") }
+    var tBaldas by remember { mutableStateOf("3") }
 
     // Guarda el diseño cada vez que cambian las piezas o la madera
     LaunchedEffect(piezas.toList(), madera) {
@@ -277,6 +311,11 @@ fun DisenoMueblesScreen() {
         cantidad = "1"
     }
 
+    fun aplicarPlantilla(lista: List<Pieza>) {
+        piezas.clear()
+        piezas.addAll(lista)
+    }
+
     val volumenTotal = piezas.sumOf { it.volumenM3.toDouble() }
     val costeTotal = volumenTotal * madera.precioM3
 
@@ -291,6 +330,13 @@ fun DisenoMueblesScreen() {
         }
     }
     val numConflictos = enConflicto.count { it }
+
+    // Valores de las plantillas
+    val tA = tAncho.replace(',', '.').toFloatOrNull()
+    val tAl = tAlto.replace(',', '.').toFloatOrNull()
+    val tF = tFondo.replace(',', '.').toFloatOrNull()
+    val tG = tGrosor.replace(',', '.').toFloatOrNull()
+    val tB = tBaldas.toIntOrNull() ?: 0
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -315,6 +361,90 @@ fun DisenoMueblesScreen() {
                 "${madera.etiqueta}: ${madera.precioM3.toInt()} € por m³ (precio de ejemplo)",
                 style = MaterialTheme.typography.bodySmall
             )
+        }
+
+        item {
+            Text("Plantillas (sustituyen el diseño actual)", style = MaterialTheme.typography.titleSmall)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = tAncho,
+                    onValueChange = { tAncho = it },
+                    label = { Text("Ancho total") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = tAlto,
+                    onValueChange = { tAlto = it },
+                    label = { Text("Alto total") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = tFondo,
+                    onValueChange = { tFondo = it },
+                    label = { Text("Fondo") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = tGrosor,
+                    onValueChange = { tGrosor = it },
+                    label = { Text("Grosor") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = tBaldas,
+                    onValueChange = { tBaldas = it },
+                    label = { Text("Baldas") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Button(
+                    onClick = {
+                        if (tA != null && tAl != null && tF != null && tG != null &&
+                            tG > 0f && tA > 2 * tG && tF > 0f && tB >= 0 &&
+                            tAl > 2 * tG + tB * tG
+                        ) {
+                            aplicarPlantilla(plantillaEstanteria(tA, tAl, tF, tG, tB))
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Estantería")
+                }
+                Button(
+                    onClick = {
+                        if (tA != null && tAl != null && tF != null && tG != null &&
+                            tG > 0f && tA > 5f && tF > 5f && tAl > tG
+                        ) {
+                            aplicarPlantilla(plantillaMesa(tA, tF, tAl, tG))
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Mesa")
+                }
+            }
         }
 
         item {
