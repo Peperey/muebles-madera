@@ -139,12 +139,13 @@ fun plantillaMesa(ancho: Float, fondo: Float, alto: Float, grosor: Float): List<
 }
 
 // Llama a la API de Groq y devuelve el texto de la respuesta. Se ejecuta en segundo plano.
+// La IA solo extrae los datos del mueble; la geometría la calcula la app con las plantillas.
 fun llamarGroq(clave: String, descripcion: String): String {
-    val sistema = """Eres un diseñador de muebles de madera. Responde SOLO con un array JSON, sin texto ni markdown. Cada elemento es una pieza con las claves: "nombre" (texto), "ancho", "alto", "grosor" (números en cm), "cantidad" (entero), "orientacion" ("DE_PIE", "DE_LADO" o "TUMBADA"), "x", "y", "z" (posición en cm de la esquina inferior izquierda de la pieza). Significado de la orientación: DE_PIE tiene ancho en X, alto en Y y grosor en Z. DE_LADO tiene grosor en X, alto en Y y ancho en Z. TUMBADA tiene ancho en X, grosor en Y y alto en Z. Las piezas no deben solaparse entre sí. Usa grosores de 1.8 a 2 cm para tableros. Todas las medidas son positivas."""
+    val sistema = """Extraes los datos de un mueble de madera a partir de una descripción. Responde SOLO con un objeto JSON, sin texto ni markdown, con estas claves: "tipo" ("estanteria" o "mesa"), "ancho", "alto", "fondo" y "grosor" (números en cm, positivos), y "baldas" (número entero de baldas; 0 si es una mesa). Si el grosor no se indica, usa 2. Ancho es la medida horizontal de frente, alto la vertical y fondo la profundidad."""
 
     val cuerpo = JSONObject().apply {
         put("model", "openai/gpt-oss-120b")
-        put("temperature", 0.2)
+        put("temperature", 0.0)
         put(
             "messages",
             JSONArray().apply {
@@ -178,41 +179,42 @@ fun llamarGroq(clave: String, descripcion: String): String {
         .getString("content")
 }
 
-// Convierte la respuesta de la IA en una lista de piezas. Ignora piezas con medidas no válidas.
-fun interpretarPiezas(texto: String): List<Pieza> {
-    val inicio = texto.indexOf('[')
-    val fin = texto.lastIndexOf(']')
+// Lee los datos del mueble, los valida y construye las piezas con las plantillas.
+fun interpretarMueble(texto: String): List<Pieza> {
+    val inicio = texto.indexOf('{')
+    val fin = texto.lastIndexOf('}')
     if (inicio < 0 || fin <= inicio) {
-        throw IllegalStateException("La respuesta no contiene una lista de piezas")
+        throw IllegalStateException("La respuesta no contiene los datos del mueble")
     }
-    val array = JSONArray(texto.substring(inicio, fin + 1))
-    val lista = mutableListOf<Pieza>()
-    for (i in 0 until array.length()) {
-        val o = array.getJSONObject(i)
-        val a = o.optDouble("ancho", 0.0).toFloat()
-        val al = o.optDouble("alto", 0.0).toFloat()
-        val g = o.optDouble("grosor", 0.0).toFloat()
-        if (a <= 0f || al <= 0f || g <= 0f) continue
-        lista.add(
-            Pieza(
-                nombre = o.optString("nombre", "Pieza ${i + 1}"),
-                anchoCm = a,
-                altoCm = al,
-                grosorCm = g,
-                cantidad = o.optInt("cantidad", 1).coerceAtLeast(1),
-                orientacion = runCatching {
-                    Orientacion.valueOf(o.optString("orientacion", "DE_PIE"))
-                }.getOrDefault(Orientacion.DE_PIE),
-                x = o.optDouble("x", 0.0).toFloat(),
-                y = o.optDouble("y", 0.0).toFloat(),
-                z = o.optDouble("z", 0.0).toFloat()
-            )
-        )
+    val o = JSONObject(texto.substring(inicio, fin + 1))
+    val tipo = o.optString("tipo", "").lowercase()
+    val ancho = o.optDouble("ancho", Double.NaN).toFloat()
+    val alto = o.optDouble("alto", Double.NaN).toFloat()
+    val fondo = o.optDouble("fondo", Double.NaN).toFloat()
+    val grosor = o.optDouble("grosor", 2.0).toFloat()
+    val baldas = o.optInt("baldas", 0)
+
+    if (ancho.isNaN() || alto.isNaN() || fondo.isNaN()) {
+        throw IllegalStateException("Faltan medidas de ancho, alto o fondo")
     }
-    if (lista.isEmpty()) {
-        throw IllegalStateException("No se obtuvieron piezas válidas")
+
+    return when (tipo) {
+        "estanteria" -> {
+            if (grosor <= 0f || ancho <= 2 * grosor || alto <= 2 * grosor + baldas * grosor ||
+                fondo <= 0f || baldas < 0 || baldas > 10
+            ) {
+                throw IllegalStateException("Medidas no válidas para una estantería")
+            }
+            plantillaEstanteria(ancho, alto, fondo, grosor, baldas)
+        }
+        "mesa" -> {
+            if (grosor <= 0f || ancho <= 5f || fondo <= 5f || alto <= grosor) {
+                throw IllegalStateException("Medidas no válidas para una mesa")
+            }
+            plantillaMesa(ancho, fondo, alto, grosor)
+        }
+        else -> throw IllegalStateException("Tipo de mueble no reconocido: $tipo")
     }
-    return lista
 }
 
 data class Proyeccion(
@@ -509,7 +511,7 @@ fun DisenoMueblesScreen() {
                                 llamarGroq(clave.trim(), descripcion.trim())
                             }
                             val lista = withContext(Dispatchers.Default) {
-                                interpretarPiezas(texto)
+                                interpretarMueble(texto)
                             }
                             propuesta = lista
                             estadoIA = "Propuesta: ${lista.size} piezas. Revísala antes de añadirla."
@@ -536,8 +538,7 @@ fun DisenoMueblesScreen() {
                 propuesta.forEach { p ->
                     Text(
                         "${p.nombre}: ${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · " +
-                            "${p.cantidad} ud. · ${p.orientacion.etiqueta} · " +
-                            "X ${p.x}  Y ${p.y}  Z ${p.z}",
+                            "${p.orientacion.etiqueta} · X ${p.x}  Y ${p.y}  Z ${p.z}",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -751,124 +752,4 @@ fun DisenoMueblesScreen() {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = cantidad,
-                    onValueChange = { cantidad = it },
-                    label = { Text("Cantidad") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f)
-                )
-                Button(
-                    onClick = { anadirPieza() },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Añadir pieza")
-                }
-            }
-        }
-
-        item {
-            Text("Vista frontal (X · Y)", style = MaterialTheme.typography.titleSmall)
-            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
-                dibujarProyeccion(
-                    proys = piezas.mapIndexed { i, p ->
-                        Proyeccion(
-                            h0 = p.x,
-                            h1 = p.x + p.dx,
-                            v0 = p.y,
-                            v1 = p.y + p.dy,
-                            conflicto = enConflicto[i],
-                            color = madera.color,
-                            texto = "${"%.0f".format(p.dx)} × ${"%.0f".format(p.dy)}"
-                        )
-                    },
-                    colorTexto = if (madera == Madera.NOGAL) {
-                        android.graphics.Color.WHITE
-                    } else {
-                        android.graphics.Color.BLACK
-                    }
-                )
-            }
-        }
-
-        item {
-            Text("Vista lateral (Z · Y)", style = MaterialTheme.typography.titleSmall)
-            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
-                dibujarProyeccion(
-                    proys = piezas.mapIndexed { i, p ->
-                        Proyeccion(
-                            h0 = p.z,
-                            h1 = p.z + p.dz,
-                            v0 = p.y,
-                            v1 = p.y + p.dy,
-                            conflicto = enConflicto[i],
-                            color = madera.color,
-                            texto = "${"%.0f".format(p.dz)} × ${"%.0f".format(p.dy)}"
-                        )
-                    },
-                    colorTexto = if (madera == Madera.NOGAL) {
-                        android.graphics.Color.WHITE
-                    } else {
-                        android.graphics.Color.BLACK
-                    }
-                )
-            }
-        }
-
-        item {
-            Text(
-                "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³  ·  " +
-                    "Coste: ${"%.2f".format(costeTotal)} €",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            if (numConflictos > 0) {
-                Text(
-                    "⚠ $numConflictos piezas se solapan (en rojo)",
-                    color = Color(0xFFD32F2F),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        }
-
-        itemsIndexed(piezas) { indice, p ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(p.nombre, style = MaterialTheme.typography.titleSmall)
-                    Text("${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · ${p.cantidad} ud.")
-                    Text(
-                        "${p.orientacion.etiqueta} · X ${p.x}  Y ${p.y}  Z ${p.z} cm",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Coste: ${"%.2f".format(p.volumenM3 * madera.precioM3)} €",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (enConflicto[indice]) {
-                        Text(
-                            "Se solapa con otra pieza",
-                            color = Color(0xFFD32F2F),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-                OutlinedButton(onClick = { piezas.removeAt(indice) }) {
-                    Text("Quitar")
-                }
-            }
-        }
-
-        item {
-            if (piezas.isNotEmpty()) {
-                OutlinedButton(onClick = { piezas.clear() }) {
-                    Text("Borrar todo")
-                }
-            }
-        }
-    }
-}
+                modifier = Mo
