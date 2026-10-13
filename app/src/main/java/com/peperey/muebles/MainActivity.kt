@@ -1,5 +1,6 @@
 package com.peperey.muebles
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -31,8 +33,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,15 +68,70 @@ enum class Madera(val etiqueta: String, val color: Color) {
     HAYA("Haya", Color(0xFFF0D2A8))
 }
 
+private const val PREFS = "muebles_prefs"
+
+fun guardarDiseno(context: Context, piezas: List<Pieza>, madera: Madera) {
+    val array = JSONArray()
+    piezas.forEach { p ->
+        array.put(
+            JSONObject().apply {
+                put("nombre", p.nombre)
+                put("ancho", p.anchoCm.toDouble())
+                put("alto", p.altoCm.toDouble())
+                put("grosor", p.grosorCm.toDouble())
+                put("cantidad", p.cantidad)
+            }
+        )
+    }
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putString("piezas", array.toString())
+        .putString("madera", madera.name)
+        .apply()
+}
+
+fun cargarDiseno(context: Context): Pair<List<Pieza>, Madera> {
+    return runCatching {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val lista = mutableListOf<Pieza>()
+        val texto = prefs.getString("piezas", null)
+        if (texto != null) {
+            val array = JSONArray(texto)
+            for (i in 0 until array.length()) {
+                val o = array.getJSONObject(i)
+                lista.add(
+                    Pieza(
+                        o.getString("nombre"),
+                        o.getDouble("ancho").toFloat(),
+                        o.getDouble("alto").toFloat(),
+                        o.getDouble("grosor").toFloat(),
+                        o.getInt("cantidad")
+                    )
+                )
+            }
+        }
+        val madera = prefs.getString("madera", null)
+            ?.let { runCatching { Madera.valueOf(it) }.getOrNull() }
+            ?: Madera.PINO
+        lista to madera
+    }.getOrElse { emptyList<Pieza>() to Madera.PINO }
+}
+
 @Composable
 fun DisenoMueblesScreen() {
-    val piezas = remember { mutableStateListOf<Pieza>() }
-    var madera by remember { mutableStateOf(Madera.PINO) }
+    val context = LocalContext.current
+    val inicial = remember { cargarDiseno(context) }
+    val piezas = remember { mutableStateListOf<Pieza>().apply { addAll(inicial.first) } }
+    var madera by remember { mutableStateOf(inicial.second) }
     var nombre by remember { mutableStateOf("") }
     var ancho by remember { mutableStateOf("") }
     var alto by remember { mutableStateOf("") }
     var grosor by remember { mutableStateOf("") }
     var cantidad by remember { mutableStateOf("1") }
+
+    // Guarda el diseño cada vez que cambian las piezas o la madera
+    LaunchedEffect(piezas.toList(), madera) {
+        guardarDiseno(context, piezas.toList(), madera)
+    }
 
     fun anadirPieza() {
         val a = ancho.replace(',', '.').toFloatOrNull()
