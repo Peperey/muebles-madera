@@ -671,3 +671,340 @@ fun DisenoMueblesScreen() {
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = {
+                            piezas.addAll(propuesta)
+                            propuesta = emptyList()
+                            estadoIA = "Piezas añadidas al diseño"
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Añadir al diseño")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            propuesta = emptyList()
+                            estadoIA = "Propuesta descartada"
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Descartar")
+                    }
+                }
+            }
+        }
+
+        item {
+            Text("Plantillas (sustituyen el diseño actual)", style = MaterialTheme.typography.titleSmall)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = tAncho,
+                    onValueChange = { tAncho = it },
+                    label = { Text("Ancho total") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = tAlto,
+                    onValueChange = { tAlto = it },
+                    label = { Text("Alto total") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = tFondo,
+                    onValueChange = { tFondo = it },
+                    label = { Text("Fondo") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = tGrosor,
+                    onValueChange = { tGrosor = it },
+                    label = { Text("Grosor") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = tBaldas,
+                    onValueChange = { tBaldas = it },
+                    label = { Text("Baldas") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Button(
+                    onClick = {
+                        if (tA != null && tAl != null && tF != null && tG != null &&
+                            tG > 0f && tA > 2 * tG && tF > 0f && tB >= 0 &&
+                            tAl > 2 * tG + tB * tG
+                        ) {
+                            aplicarPlantilla(plantillaEstanteria(tA, tAl, tF, tG, tB))
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Estantería")
+                }
+                Button(
+                    onClick = {
+                        if (tA != null && tAl != null && tF != null && tG != null &&
+                            tG > 0f && tA > 5f && tF > 5f && tAl > tG
+                        ) {
+                            aplicarPlantilla(plantillaMesa(tA, tF, tAl, tG))
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Mesa")
+                }
+            }
+        }
+
+        item {
+            OutlinedTextField(
+                value = nombre,
+                onValueChange = { nombre = it },
+                label = { Text("Nombre de la pieza") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            Text("Orientación", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Orientacion.entries.forEach { o ->
+                    FilterChip(
+                        selected = o == orientacion,
+                        onClick = { orientacion = o },
+                        label = { Text(o.etiqueta) }
+                    )
+                }
+            }
+        }
+
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = ancho,
+                    onValueChange = { ancho = it },
+                    label = { Text("Ancho cm") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = alto,
+                    onValueChange = { alto = it },
+                    label = { Text("Alto cm") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = grosor,
+                    onValueChange = { grosor = it },
+                    label = { Text("Grosor cm") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
+            Text(
+                "Posición de la esquina inferior (cm)",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = px,
+                    onValueChange = { px = it },
+                    label = { Text("X") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = py,
+                    onValueChange = { py = it },
+                    label = { Text("Y") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = pz,
+                    onValueChange = { pz = it },
+                    label = { Text("Z") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = cantidad,
+                    onValueChange = { cantidad = it },
+                    label = { Text("Cantidad") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = { anadirPieza() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Añadir pieza")
+                }
+            }
+        }
+
+        item {
+            Text("Vista frontal (X · Y)", style = MaterialTheme.typography.titleSmall)
+            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+                dibujarProyeccion(
+                    proys = piezas.mapIndexed { i, p ->
+                        Proyeccion(
+                            h0 = p.x,
+                            h1 = p.x + p.dx,
+                            v0 = p.y,
+                            v1 = p.y + p.dy,
+                            conflicto = enConflicto[i],
+                            color = madera.color,
+                            texto = "${"%.0f".format(p.dx)} × ${"%.0f".format(p.dy)}"
+                        )
+                    },
+                    colorTexto = if (madera == Madera.NOGAL) {
+                        android.graphics.Color.WHITE
+                    } else {
+                        android.graphics.Color.BLACK
+                    }
+                )
+            }
+        }
+
+        item {
+            Text("Vista lateral (Z · Y)", style = MaterialTheme.typography.titleSmall)
+            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+                dibujarProyeccion(
+                    proys = piezas.mapIndexed { i, p ->
+                        Proyeccion(
+                            h0 = p.z,
+                            h1 = p.z + p.dz,
+                            v0 = p.y,
+                            v1 = p.y + p.dy,
+                            conflicto = enConflicto[i],
+                            color = madera.color,
+                            texto = "${"%.0f".format(p.dz)} × ${"%.0f".format(p.dy)}"
+                        )
+                    },
+                    colorTexto = if (madera == Madera.NOGAL) {
+                        android.graphics.Color.WHITE
+                    } else {
+                        android.graphics.Color.BLACK
+                    }
+                )
+            }
+        }
+
+        item {
+            Text("Vista 3D (arrastra el control para girar)", style = MaterialTheme.typography.titleSmall)
+            Canvas(modifier = Modifier.fillMaxWidth().height(260.dp)) {
+                dibujarVista3D(piezas, enConflicto, madera.color, angulo)
+            }
+            Slider(
+                value = angulo,
+                onValueChange = { angulo = it },
+                valueRange = 0f..360f,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            Text(
+                "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³  ·  " +
+                    "Coste: ${"%.2f".format(costeTotal)} €",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            if (numConflictos > 0) {
+                Text(
+                    "⚠ $numConflictos piezas se solapan (en rojo)",
+                    color = Color(0xFFD32F2F),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+        }
+
+        itemsIndexed(piezas) { indice, p ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(p.nombre, style = MaterialTheme.typography.titleSmall)
+                    Text("${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · ${p.cantidad} ud.")
+                    Text(
+                        "${p.orientacion.etiqueta} · X ${p.x}  Y ${p.y}  Z ${p.z} cm",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Coste: ${"%.2f".format(p.volumenM3 * madera.precioM3)} €",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (enConflicto[indice]) {
+                        Text(
+                            "Se solapa con otra pieza",
+                            color = Color(0xFFD32F2F),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+                OutlinedButton(onClick = { piezas.removeAt(indice) }) {
+                    Text("Quitar")
+                }
+            }
+        }
+
+        item {
+            if (piezas.isNotEmpty()) {
+                OutlinedButton(onClick = { piezas.clear() }) {
+                    Text("Borrar todo")
+                }
+            }
+        }
+    }
+}
