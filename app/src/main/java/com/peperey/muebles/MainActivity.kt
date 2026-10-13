@@ -19,11 +19,13 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,8 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -48,6 +52,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -283,6 +291,119 @@ fun DrawScope.dibujarProyeccion(proys: List<Proyeccion>, colorTexto: Int) {
     }
 }
 
+// ---------- Vista 3D isométrica ----------
+
+private data class V3(val x: Float, val y: Float, val z: Float)
+
+private class Cara(val indices: IntArray, val normal: V3)
+
+private class Poligono(val profundidad: Float, val puntos: List<Pair<Float, Float>>, val color: Color)
+
+// Índice de esquina: bit 0 = X, bit 1 = Y, bit 2 = Z (0 = mínimo, 1 = máximo)
+private val CARAS = listOf(
+    Cara(intArrayOf(4, 5, 7, 6), V3(0f, 0f, 1f)),
+    Cara(intArrayOf(0, 1, 3, 2), V3(0f, 0f, -1f)),
+    Cara(intArrayOf(2, 3, 7, 6), V3(0f, 1f, 0f)),
+    Cara(intArrayOf(0, 1, 5, 4), V3(0f, -1f, 0f)),
+    Cara(intArrayOf(1, 3, 7, 5), V3(1f, 0f, 0f)),
+    Cara(intArrayOf(0, 2, 6, 4), V3(-1f, 0f, 0f))
+)
+
+// Dirección de la luz, aproximadamente unitaria
+private val LUZ = V3(-0.39f, 0.78f, 0.49f)
+
+private fun rotarY(p: V3, cosA: Float, sinA: Float) =
+    V3(p.x * cosA + p.z * sinA, p.y, -p.x * sinA + p.z * cosA)
+
+private fun producto(a: V3, b: V3): Float = a.x * b.x + a.y * b.y + a.z * b.z
+
+fun DrawScope.dibujarVista3D(
+    piezas: List<Pieza>,
+    conflicto: BooleanArray,
+    colorBase: Color,
+    anguloGrados: Float
+) {
+    if (piezas.isEmpty()) return
+    val rad = Math.toRadians(anguloGrados.toDouble())
+    val cosA = cos(rad).toFloat()
+    val sinA = sin(rad).toFloat()
+    val elev = Math.toRadians(28.0)
+    val sinE = sin(elev).toFloat()
+    val cosE = cos(elev).toFloat()
+    // Dirección desde el mueble hacia el observador: desde arriba y desde delante
+    val vista = V3(0f, sinE, cosE)
+
+    val minX = piezas.minOf { it.x }
+    val maxX = piezas.maxOf { it.x + it.dx }
+    val minY = piezas.minOf { it.y }
+    val maxY = piezas.maxOf { it.y + it.dy }
+    val minZ = piezas.minOf { it.z }
+    val maxZ = piezas.maxOf { it.z + it.dz }
+    val cx = (minX + maxX) / 2f
+    val cy = (minY + maxY) / 2f
+    val cz = (minZ + maxZ) / 2f
+
+    val poligonos = mutableListOf<Poligono>()
+    piezas.forEachIndexed { i, p ->
+        val esquinas = Array(8) { idx ->
+            val ox = (idx and 1).toFloat()
+            val oy = ((idx shr 1) and 1).toFloat()
+            val oz = ((idx shr 2) and 1).toFloat()
+            rotarY(
+                V3(p.x + ox * p.dx - cx, p.y + oy * p.dy - cy, p.z + oz * p.dz - cz),
+                cosA,
+                sinA
+            )
+        }
+        val centro = rotarY(
+            V3(p.x + p.dx / 2f - cx, p.y + p.dy / 2f - cy, p.z + p.dz / 2f - cz),
+            cosA,
+            sinA
+        )
+        val profundidad = producto(centro, vista)
+        val base = if (conflicto[i]) Color(0xFFD32F2F) else colorBase
+
+        CARAS.forEach { cara ->
+            val n = rotarY(cara.normal, cosA, sinA)
+            // Solo se dibujan las caras que miran al observador
+            if (producto(n, vista) <= 0f) return@forEach
+            val brillo = 0.55f + 0.45f * max(0f, producto(n, LUZ))
+            val color = lerp(Color.Black, base, brillo)
+            val puntos = cara.indices.map { idx ->
+                val e = esquinas[idx]
+                Pair(e.x, -e.y * cosE + e.z * sinE)
+            }
+            poligonos += Poligono(profundidad, puntos, color)
+        }
+    }
+
+    // Dibuja primero lo más lejano para que lo cercano tape lo que queda detrás
+    poligonos.sortBy { it.profundidad }
+
+    val todos = poligonos.flatMap { it.puntos }
+    val minSx = todos.minOf { it.first }
+    val maxSx = todos.maxOf { it.first }
+    val minSy = todos.minOf { it.second }
+    val maxSy = todos.maxOf { it.second }
+    val margen = 16f
+    val escala = min(
+        (size.width - 2 * margen) / max(maxSx - minSx, 1f),
+        (size.height - 2 * margen) / max(maxSy - minSy, 1f)
+    )
+
+    poligonos.forEach { poli ->
+        val path = Path()
+        poli.puntos.forEachIndexed { k, punto ->
+            val px = margen + (punto.first - minSx) * escala
+            val py = margen + (punto.second - minSy) * escala
+            if (k == 0) path.moveTo(px, py) else path.lineTo(px, py)
+        }
+        path.close()
+        drawPath(path, poli.color)
+        drawPath(path, Color.Black, style = Stroke(1.5f))
+    }
+}
+
 private const val PREFS = "muebles_prefs"
 
 fun guardarDiseno(context: Context, piezas: List<Pieza>, madera: Madera) {
@@ -372,6 +493,7 @@ fun DisenoMueblesScreen() {
     var tFondo by remember { mutableStateOf("") }
     var tGrosor by remember { mutableStateOf("") }
     var tBaldas by remember { mutableStateOf("3") }
+    var angulo by remember { mutableFloatStateOf(30f) }
 
     // Estado de la IA
     var clave by remember { mutableStateOf(cargarClave(context)) }
@@ -549,327 +671,3 @@ fun DisenoMueblesScreen() {
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        onClick = {
-                            piezas.addAll(propuesta)
-                            propuesta = emptyList()
-                            estadoIA = "Piezas añadidas al diseño"
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Añadir al diseño")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            propuesta = emptyList()
-                            estadoIA = "Propuesta descartada"
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Descartar")
-                    }
-                }
-            }
-        }
-
-        item {
-            Text("Plantillas (sustituyen el diseño actual)", style = MaterialTheme.typography.titleSmall)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = tAncho,
-                    onValueChange = { tAncho = it },
-                    label = { Text("Ancho total") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = tAlto,
-                    onValueChange = { tAlto = it },
-                    label = { Text("Alto total") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = tFondo,
-                    onValueChange = { tFondo = it },
-                    label = { Text("Fondo") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = tGrosor,
-                    onValueChange = { tGrosor = it },
-                    label = { Text("Grosor") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = tBaldas,
-                    onValueChange = { tBaldas = it },
-                    label = { Text("Baldas") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Button(
-                    onClick = {
-                        if (tA != null && tAl != null && tF != null && tG != null &&
-                            tG > 0f && tA > 2 * tG && tF > 0f && tB >= 0 &&
-                            tAl > 2 * tG + tB * tG
-                        ) {
-                            aplicarPlantilla(plantillaEstanteria(tA, tAl, tF, tG, tB))
-                        }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Estantería")
-                }
-                Button(
-                    onClick = {
-                        if (tA != null && tAl != null && tF != null && tG != null &&
-                            tG > 0f && tA > 5f && tF > 5f && tAl > tG
-                        ) {
-                            aplicarPlantilla(plantillaMesa(tA, tF, tAl, tG))
-                        }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Mesa")
-                }
-            }
-        }
-
-        item {
-            OutlinedTextField(
-                value = nombre,
-                onValueChange = { nombre = it },
-                label = { Text("Nombre de la pieza") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        item {
-            Text("Orientación", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Orientacion.entries.forEach { o ->
-                    FilterChip(
-                        selected = o == orientacion,
-                        onClick = { orientacion = o },
-                        label = { Text(o.etiqueta) }
-                    )
-                }
-            }
-        }
-
-        item {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = ancho,
-                    onValueChange = { ancho = it },
-                    label = { Text("Ancho cm") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = alto,
-                    onValueChange = { alto = it },
-                    label = { Text("Alto cm") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = grosor,
-                    onValueChange = { grosor = it },
-                    label = { Text("Grosor cm") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        item {
-            Text(
-                "Posición de la esquina inferior (cm)",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = px,
-                    onValueChange = { px = it },
-                    label = { Text("X") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = py,
-                    onValueChange = { py = it },
-                    label = { Text("Y") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = pz,
-                    onValueChange = { pz = it },
-                    label = { Text("Z") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        item {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = cantidad,
-                    onValueChange = { cantidad = it },
-                    label = { Text("Cantidad") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f)
-                )
-                Button(
-                    onClick = { anadirPieza() },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Añadir pieza")
-                }
-            }
-        }
-
-        item {
-            Text("Vista frontal (X · Y)", style = MaterialTheme.typography.titleSmall)
-            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
-                dibujarProyeccion(
-                    proys = piezas.mapIndexed { i, p ->
-                        Proyeccion(
-                            h0 = p.x,
-                            h1 = p.x + p.dx,
-                            v0 = p.y,
-                            v1 = p.y + p.dy,
-                            conflicto = enConflicto[i],
-                            color = madera.color,
-                            texto = "${"%.0f".format(p.dx)} × ${"%.0f".format(p.dy)}"
-                        )
-                    },
-                    colorTexto = if (madera == Madera.NOGAL) {
-                        android.graphics.Color.WHITE
-                    } else {
-                        android.graphics.Color.BLACK
-                    }
-                )
-            }
-        }
-
-        item {
-            Text("Vista lateral (Z · Y)", style = MaterialTheme.typography.titleSmall)
-            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
-                dibujarProyeccion(
-                    proys = piezas.mapIndexed { i, p ->
-                        Proyeccion(
-                            h0 = p.z,
-                            h1 = p.z + p.dz,
-                            v0 = p.y,
-                            v1 = p.y + p.dy,
-                            conflicto = enConflicto[i],
-                            color = madera.color,
-                            texto = "${"%.0f".format(p.dz)} × ${"%.0f".format(p.dy)}"
-                        )
-                    },
-                    colorTexto = if (madera == Madera.NOGAL) {
-                        android.graphics.Color.WHITE
-                    } else {
-                        android.graphics.Color.BLACK
-                    }
-                )
-            }
-        }
-
-        item {
-            Text(
-                "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³  ·  " +
-                    "Coste: ${"%.2f".format(costeTotal)} €",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            if (numConflictos > 0) {
-                Text(
-                    "⚠ $numConflictos piezas se solapan (en rojo)",
-                    color = Color(0xFFD32F2F),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        }
-
-        itemsIndexed(piezas) { indice, p ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(p.nombre, style = MaterialTheme.typography.titleSmall)
-                    Text("${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · ${p.cantidad} ud.")
-                    Text(
-                        "${p.orientacion.etiqueta} · X ${p.x}  Y ${p.y}  Z ${p.z} cm",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Coste: ${"%.2f".format(p.volumenM3 * madera.precioM3)} €",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (enConflicto[indice]) {
-                        Text(
-                            "Se solapa con otra pieza",
-                            color = Color(0xFFD32F2F),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-                OutlinedButton(onClick = { piezas.removeAt(indice) }) {
-                    Text("Quitar")
-                }
-            }
-        }
-
-        item {
-            if (piezas.isNotEmpty()) {
-                OutlinedButton(onClick = { piezas.clear() }) {
-                    Text("Borrar todo")
-                }
-            }
-        }
-    }
-}
