@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,15 +53,39 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+enum class Orientacion(val etiqueta: String) {
+    DE_PIE("De pie"),
+    DE_LADO("De lado"),
+    TUMBADA("Tumbada")
+}
+
 data class Pieza(
     val nombre: String,
     val anchoCm: Float,
     val altoCm: Float,
     val grosorCm: Float,
-    val cantidad: Int
+    val cantidad: Int,
+    val orientacion: Orientacion = Orientacion.DE_PIE,
+    val x: Float = 0f,
+    val y: Float = 0f,
+    val z: Float = 0f
 ) {
     val volumenM3: Float
         get() = anchoCm * altoCm * grosorCm / 1_000_000f * cantidad
+
+    // Tamaño real de la pieza en los ejes X, Y y Z según su orientación
+    val dx: Float
+        get() = if (orientacion == Orientacion.DE_LADO) grosorCm else anchoCm
+
+    val dy: Float
+        get() = if (orientacion == Orientacion.TUMBADA) grosorCm else altoCm
+
+    val dz: Float
+        get() = when (orientacion) {
+            Orientacion.DE_PIE -> grosorCm
+            Orientacion.DE_LADO -> anchoCm
+            Orientacion.TUMBADA -> altoCm
+        }
 }
 
 // precioM3: precio de ejemplo en euros por metro cúbico. Cámbialo por el de tu zona.
@@ -68,6 +94,78 @@ enum class Madera(val etiqueta: String, val color: Color, val precioM3: Double) 
     ROBLE("Roble", Color(0xFFB08850), 900.0),
     NOGAL("Nogal", Color(0xFF6B4A2B), 1100.0),
     HAYA("Haya", Color(0xFFF0D2A8), 500.0)
+}
+
+// Dos piezas se solapan si sus cajas en el espacio se cruzan (tocarse no cuenta)
+fun seSolapan(a: Pieza, b: Pieza, eps: Float = 0.01f): Boolean =
+    a.x < b.x + b.dx - eps && b.x < a.x + a.dx - eps &&
+        a.y < b.y + b.dy - eps && b.y < a.y + a.dy - eps &&
+        a.z < b.z + b.dz - eps && b.z < a.z + a.dz - eps
+
+data class Proyeccion(
+    val h0: Float,
+    val h1: Float,
+    val v0: Float,
+    val v1: Float,
+    val conflicto: Boolean,
+    val color: Color,
+    val texto: String
+)
+
+fun DrawScope.dibujarProyeccion(proys: List<Proyeccion>, colorTexto: Int) {
+    if (proys.isEmpty()) return
+    val margen = 16f
+    val minH = proys.minOf { it.h0 }
+    val maxH = proys.maxOf { it.h1 }
+    val minV = proys.minOf { it.v0 }
+    val maxV = proys.maxOf { it.v1 }
+    val anchoRef = maxOf(maxH - minH, 1f)
+    val altoRef = maxOf(maxV - minV, 1f)
+    val escala = minOf(
+        (size.width - 2 * margen) / anchoRef,
+        (size.height - 2 * margen) / altoRef
+    )
+
+    // Línea de suelo
+    drawLine(
+        color = Color.Gray,
+        start = Offset(margen, size.height - margen),
+        end = Offset(size.width - margen, size.height - margen),
+        strokeWidth = 2f
+    )
+
+    val paint = android.graphics.Paint().apply {
+        textSize = 26f
+        isAntiAlias = true
+        textAlign = android.graphics.Paint.Align.CENTER
+        color = colorTexto
+    }
+
+    proys.forEach { p ->
+        val left = margen + (p.h0 - minH) * escala
+        val top = size.height - margen - (p.v1 - minV) * escala
+        val w = (p.h1 - p.h0) * escala
+        val h = (p.v1 - p.v0) * escala
+        drawRect(
+            color = if (p.conflicto) Color(0xFFD32F2F) else p.color,
+            topLeft = Offset(left, top),
+            size = Size(w, h)
+        )
+        drawRect(
+            color = Color.Black,
+            topLeft = Offset(left, top),
+            size = Size(w, h),
+            style = Stroke(2f)
+        )
+        if (w >= 70f && h >= 40f) {
+            drawContext.canvas.nativeCanvas.drawText(
+                p.texto,
+                left + w / 2f,
+                top + h / 2f + paint.textSize / 3f,
+                paint
+            )
+        }
+    }
 }
 
 private const val PREFS = "muebles_prefs"
@@ -82,6 +180,10 @@ fun guardarDiseno(context: Context, piezas: List<Pieza>, madera: Madera) {
                 put("alto", p.altoCm.toDouble())
                 put("grosor", p.grosorCm.toDouble())
                 put("cantidad", p.cantidad)
+                put("orientacion", p.orientacion.name)
+                put("x", p.x.toDouble())
+                put("y", p.y.toDouble())
+                put("z", p.z.toDouble())
             }
         )
     }
@@ -102,11 +204,17 @@ fun cargarDiseno(context: Context): Pair<List<Pieza>, Madera> {
                 val o = array.getJSONObject(i)
                 lista.add(
                     Pieza(
-                        o.getString("nombre"),
-                        o.getDouble("ancho").toFloat(),
-                        o.getDouble("alto").toFloat(),
-                        o.getDouble("grosor").toFloat(),
-                        o.getInt("cantidad")
+                        nombre = o.getString("nombre"),
+                        anchoCm = o.getDouble("ancho").toFloat(),
+                        altoCm = o.getDouble("alto").toFloat(),
+                        grosorCm = o.getDouble("grosor").toFloat(),
+                        cantidad = o.getInt("cantidad"),
+                        orientacion = runCatching {
+                            Orientacion.valueOf(o.optString("orientacion", "DE_PIE"))
+                        }.getOrDefault(Orientacion.DE_PIE),
+                        x = o.optDouble("x", 0.0).toFloat(),
+                        y = o.optDouble("y", 0.0).toFloat(),
+                        z = o.optDouble("z", 0.0).toFloat()
                     )
                 )
             }
@@ -125,9 +233,13 @@ fun DisenoMueblesScreen() {
     val piezas = remember { mutableStateListOf<Pieza>().apply { addAll(inicial.first) } }
     var madera by remember { mutableStateOf(inicial.second) }
     var nombre by remember { mutableStateOf("") }
+    var orientacion by remember { mutableStateOf(Orientacion.DE_PIE) }
     var ancho by remember { mutableStateOf("") }
     var alto by remember { mutableStateOf("") }
     var grosor by remember { mutableStateOf("") }
+    var px by remember { mutableStateOf("0") }
+    var py by remember { mutableStateOf("0") }
+    var pz by remember { mutableStateOf("0") }
     var cantidad by remember { mutableStateOf("1") }
 
     // Guarda el diseño cada vez que cambian las piezas o la madera
@@ -142,16 +254,43 @@ fun DisenoMueblesScreen() {
         val c = cantidad.toIntOrNull()
         if (a == null || al == null || g == null || c == null) return
         if (a <= 0f || al <= 0f || g <= 0f || c <= 0) return
-        piezas.add(Pieza(nombre.ifBlank { "Pieza ${piezas.size + 1}" }, a, al, g, c))
+        piezas.add(
+            Pieza(
+                nombre = nombre.ifBlank { "Pieza ${piezas.size + 1}" },
+                anchoCm = a,
+                altoCm = al,
+                grosorCm = g,
+                cantidad = c,
+                orientacion = orientacion,
+                x = px.replace(',', '.').toFloatOrNull() ?: 0f,
+                y = py.replace(',', '.').toFloatOrNull() ?: 0f,
+                z = pz.replace(',', '.').toFloatOrNull() ?: 0f
+            )
+        )
         nombre = ""
         ancho = ""
         alto = ""
         grosor = ""
+        px = "0"
+        py = "0"
+        pz = "0"
         cantidad = "1"
     }
 
     val volumenTotal = piezas.sumOf { it.volumenM3.toDouble() }
     val costeTotal = volumenTotal * madera.precioM3
+
+    // Marca las piezas que se solapan con otra
+    val enConflicto = BooleanArray(piezas.size)
+    for (i in piezas.indices) {
+        for (j in i + 1 until piezas.size) {
+            if (seSolapan(piezas[i], piezas[j])) {
+                enConflicto[i] = true
+                enConflicto[j] = true
+            }
+        }
+    }
+    val numConflictos = enConflicto.count { it }
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -189,6 +328,19 @@ fun DisenoMueblesScreen() {
         }
 
         item {
+            Text("Orientación", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Orientacion.entries.forEach { o ->
+                    FilterChip(
+                        selected = o == orientacion,
+                        onClick = { orientacion = o },
+                        label = { Text(o.etiqueta) }
+                    )
+                }
+            }
+        }
+
+        item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -221,6 +373,42 @@ fun DisenoMueblesScreen() {
         }
 
         item {
+            Text(
+                "Posición de la esquina inferior (cm)",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = px,
+                    onValueChange = { px = it },
+                    label = { Text("X") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = py,
+                    onValueChange = { py = it },
+                    label = { Text("Y") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = pz,
+                    onValueChange = { pz = it },
+                    label = { Text("Z") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -244,47 +432,50 @@ fun DisenoMueblesScreen() {
         }
 
         item {
-            Text("Vista frontal", style = MaterialTheme.typography.titleSmall)
-            Canvas(modifier = Modifier.fillMaxWidth().height(200.dp)) {
-                if (piezas.isEmpty()) return@Canvas
-                val altoMax = piezas.maxOf { it.altoCm }
-                val anchoTotal = piezas.sumOf { it.anchoCm.toDouble() }.toFloat()
-                val separacion = 8f
-                val escala = minOf(
-                    size.height / altoMax,
-                    (size.width - separacion * (piezas.size - 1)) / anchoTotal
-                )
-                val texto = android.graphics.Paint().apply {
-                    textSize = 28f
-                    isAntiAlias = true
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    color = if (madera == Madera.NOGAL) {
+            Text("Vista frontal (X · Y)", style = MaterialTheme.typography.titleSmall)
+            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+                dibujarProyeccion(
+                    proys = piezas.mapIndexed { i, p ->
+                        Proyeccion(
+                            h0 = p.x,
+                            h1 = p.x + p.dx,
+                            v0 = p.y,
+                            v1 = p.y + p.dy,
+                            conflicto = enConflicto[i],
+                            color = madera.color,
+                            texto = "${"%.0f".format(p.dx)} × ${"%.0f".format(p.dy)}"
+                        )
+                    },
+                    colorTexto = if (madera == Madera.NOGAL) {
                         android.graphics.Color.WHITE
                     } else {
                         android.graphics.Color.BLACK
                     }
-                }
-                var x = 0f
-                piezas.forEach { p ->
-                    val w = p.anchoCm * escala
-                    val h = p.altoCm * escala
-                    val arriba = size.height - h
-                    drawRect(
-                        color = madera.color,
-                        topLeft = Offset(x, arriba),
-                        size = Size(w, h)
-                    )
-                    // Solo escribe la medida si cabe dentro de la pieza
-                    if (w >= 70f && h >= 40f) {
-                        drawContext.canvas.nativeCanvas.drawText(
-                            "${"%.0f".format(p.anchoCm)} × ${"%.0f".format(p.altoCm)}",
-                            x + w / 2f,
-                            arriba + h / 2f + texto.textSize / 3f,
-                            texto
+                )
+            }
+        }
+
+        item {
+            Text("Vista lateral (Z · Y)", style = MaterialTheme.typography.titleSmall)
+            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+                dibujarProyeccion(
+                    proys = piezas.mapIndexed { i, p ->
+                        Proyeccion(
+                            h0 = p.z,
+                            h1 = p.z + p.dz,
+                            v0 = p.y,
+                            v1 = p.y + p.dy,
+                            conflicto = enConflicto[i],
+                            color = madera.color,
+                            texto = "${"%.0f".format(p.dz)} × ${"%.0f".format(p.dy)}"
                         )
+                    },
+                    colorTexto = if (madera == Madera.NOGAL) {
+                        android.graphics.Color.WHITE
+                    } else {
+                        android.graphics.Color.BLACK
                     }
-                    x += w + separacion
-                }
+                )
             }
         }
 
@@ -294,6 +485,13 @@ fun DisenoMueblesScreen() {
                     "Coste: ${"%.2f".format(costeTotal)} €",
                 style = MaterialTheme.typography.bodyLarge
             )
+            if (numConflictos > 0) {
+                Text(
+                    "⚠ $numConflictos piezas se solapan (en rojo)",
+                    color = Color(0xFFD32F2F),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
         }
 
         itemsIndexed(piezas) { indice, p ->
@@ -305,9 +503,20 @@ fun DisenoMueblesScreen() {
                     Text(p.nombre, style = MaterialTheme.typography.titleSmall)
                     Text("${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · ${p.cantidad} ud.")
                     Text(
+                        "${p.orientacion.etiqueta} · X ${p.x}  Y ${p.y}  Z ${p.z} cm",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
                         "Coste: ${"%.2f".format(p.volumenM3 * madera.precioM3)} €",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    if (enConflicto[indice]) {
+                        Text(
+                            "Se solapa con otra pieza",
+                            color = Color(0xFFD32F2F),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
                 OutlinedButton(onClick = { piezas.removeAt(indice) }) {
                     Text("Quitar")
