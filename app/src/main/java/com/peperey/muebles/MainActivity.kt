@@ -146,10 +146,83 @@ fun plantillaMesa(ancho: Float, fondo: Float, alto: Float, grosor: Float): List<
     )
 }
 
+// Plantilla: banco con asiento, dos patas laterales y un travesaño inferior
+fun plantillaBanco(ancho: Float, alto: Float, fondo: Float, grosor: Float): List<Pieza> {
+    val g = grosor
+    return listOf(
+        Pieza("Pata izquierda", fondo, alto - g, g, 1, Orientacion.DE_LADO, 0f, 0f, 0f),
+        Pieza("Pata derecha", fondo, alto - g, g, 1, Orientacion.DE_LADO, ancho - g, 0f, 0f),
+        Pieza("Asiento", ancho, fondo, g, 1, Orientacion.TUMBADA, 0f, alto - g, 0f),
+        Pieza(
+            "Travesaño",
+            ancho - 2 * g, g, g, 1, Orientacion.TUMBADA,
+            g, (alto - g) / 2f - g / 2f, (fondo - g) / 2f
+        )
+    )
+}
+
+// Plantilla: mesa de noche con un cajón arriba y un hueco abierto debajo
+fun plantillaMesaNoche(ancho: Float, alto: Float, fondo: Float, grosor: Float): List<Pieza> {
+    val g = grosor
+    val mid = alto / 2f - g / 2f
+    val h = alto - 2 * g - mid
+    return listOf(
+        Pieza("Lateral izquierdo", fondo, alto, g, 1, Orientacion.DE_LADO, 0f, 0f, 0f),
+        Pieza("Lateral derecho", fondo, alto, g, 1, Orientacion.DE_LADO, ancho - g, 0f, 0f),
+        Pieza("Base", ancho - 2 * g, fondo, g, 1, Orientacion.TUMBADA, g, 0f, 0f),
+        Pieza("Techo", ancho - 2 * g, fondo, g, 1, Orientacion.TUMBADA, g, alto - g, 0f),
+        Pieza("Divisor", ancho - 2 * g, fondo, g, 1, Orientacion.TUMBADA, g, mid, 0f),
+        Pieza("Frontal del cajón", ancho - 2 * g, h, g, 1, Orientacion.DE_PIE, g, mid + g, 0f)
+    )
+}
+
+// Crea las piezas de una plantilla comprobando antes que las medidas tienen sentido.
+// Lanza IllegalStateException con un mensaje claro si no lo tienen.
+fun construirPlantilla(
+    tipo: String,
+    ancho: Float,
+    alto: Float,
+    fondo: Float,
+    grosor: Float,
+    baldas: Int
+): List<Pieza> {
+    return when (tipo) {
+        "estanteria" -> {
+            if (grosor <= 0f || ancho <= 2 * grosor || alto <= 2 * grosor + baldas * grosor ||
+                fondo <= 0f || baldas < 0 || baldas > 10
+            ) {
+                throw IllegalStateException("Medidas no válidas para una estantería")
+            }
+            plantillaEstanteria(ancho, alto, fondo, grosor, baldas)
+        }
+        "mesa" -> {
+            if (grosor <= 0f || ancho <= 5f || fondo <= 5f || alto <= grosor) {
+                throw IllegalStateException("Medidas no válidas para una mesa")
+            }
+            plantillaMesa(ancho, fondo, alto, grosor)
+        }
+        "banco" -> {
+            if (grosor <= 0f || ancho <= 2 * grosor + 5f || fondo <= 5f || alto <= 2 * grosor + 10f) {
+                throw IllegalStateException("Medidas no válidas para un banco")
+            }
+            plantillaBanco(ancho, alto, fondo, grosor)
+        }
+        "mesa_noche" -> {
+            val mid = alto / 2f - grosor / 2f
+            val hueco = alto - 2 * grosor - mid
+            if (grosor <= 0f || ancho <= 2 * grosor + 5f || fondo <= 5f || hueco < 5f) {
+                throw IllegalStateException("Medidas no válidas para una mesa de noche")
+            }
+            plantillaMesaNoche(ancho, alto, fondo, grosor)
+        }
+        else -> throw IllegalStateException("Tipo de mueble no reconocido: $tipo")
+    }
+}
+
 // Llama a la API de Groq y devuelve el texto de la respuesta. Se ejecuta en segundo plano.
 // La IA solo extrae los datos del mueble; la geometría la calcula la app con las plantillas.
 fun llamarGroq(clave: String, descripcion: String): String {
-    val sistema = """Extraes los datos de un mueble de madera a partir de una descripción. Responde SOLO con un objeto JSON, sin texto ni markdown, con estas claves: "tipo" ("estanteria" o "mesa"), "ancho", "alto", "fondo" y "grosor" (números en cm, positivos), y "baldas" (número entero de baldas; 0 si es una mesa). Si el grosor no se indica, usa 2. Ancho es la medida horizontal de frente, alto la vertical y fondo la profundidad."""
+    val sistema = """Extraes los datos de un mueble de madera a partir de una descripción. Responde SOLO con un objeto JSON, sin texto ni markdown, con estas claves: "tipo" ("estanteria", "mesa", "banco" o "mesa_noche"), "ancho", "alto", "fondo" y "grosor" (números en cm, positivos), y "baldas" (número entero de baldas; 0 si no son estanterías). Si el grosor no se indica, usa 2. Ancho es la medida horizontal de frente, alto la vertical y fondo la profundidad."""
 
     val cuerpo = JSONObject().apply {
         put("model", "openai/gpt-oss-120b")
@@ -206,23 +279,7 @@ fun interpretarMueble(texto: String): List<Pieza> {
         throw IllegalStateException("Faltan medidas de ancho, alto o fondo")
     }
 
-    return when (tipo) {
-        "estanteria" -> {
-            if (grosor <= 0f || ancho <= 2 * grosor || alto <= 2 * grosor + baldas * grosor ||
-                fondo <= 0f || baldas < 0 || baldas > 10
-            ) {
-                throw IllegalStateException("Medidas no válidas para una estantería")
-            }
-            plantillaEstanteria(ancho, alto, fondo, grosor, baldas)
-        }
-        "mesa" -> {
-            if (grosor <= 0f || ancho <= 5f || fondo <= 5f || alto <= grosor) {
-                throw IllegalStateException("Medidas no válidas para una mesa")
-            }
-            plantillaMesa(ancho, fondo, alto, grosor)
-        }
-        else -> throw IllegalStateException("Tipo de mueble no reconocido: $tipo")
-    }
+    return construirPlantilla(tipo, ancho, alto, fondo, grosor, baldas)
 }
 
 data class Proyeccion(
@@ -494,6 +551,7 @@ fun DisenoMueblesScreen() {
     var tGrosor by remember { mutableStateOf("") }
     var tBaldas by remember { mutableStateOf("3") }
     var angulo by remember { mutableFloatStateOf(30f) }
+    var mensajePlantilla by remember { mutableStateOf("") }
 
     // Estado de la IA
     var clave by remember { mutableStateOf(cargarClave(context)) }
@@ -570,6 +628,24 @@ fun DisenoMueblesScreen() {
     val tG = tGrosor.replace(',', '.').toFloatOrNull()
     val tB = tBaldas.toIntOrNull() ?: 0
 
+    // Aplica una plantilla y muestra el motivo si no se puede
+    fun aplicarPlantillaSegura(tipo: String) {
+        val a = tA
+        val al = tAl
+        val f = tF
+        val g = tG
+        if (a == null || al == null || f == null || g == null) {
+            mensajePlantilla = "Rellena ancho, alto, fondo y grosor"
+            return
+        }
+        try {
+            aplicarPlantilla(construirPlantilla(tipo, a, al, f, g, tB))
+            mensajePlantilla = "Plantilla aplicada"
+        } catch (e: IllegalStateException) {
+            mensajePlantilla = e.message ?: "Medidas no válidas"
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -618,7 +694,7 @@ fun DisenoMueblesScreen() {
                 value = descripcion,
                 onValueChange = { descripcion = it },
                 label = { Text("Describe el mueble") },
-                placeholder = { Text("Ej.: estantería de 90 cm de ancho, 180 de alto, 30 de fondo, con 4 baldas") },
+                placeholder = { Text("Ej.: banco de 120 cm de ancho, 45 de alto, 40 de fondo") },
                 maxLines = 3,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -752,30 +828,45 @@ fun DisenoMueblesScreen() {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Button(
-                    onClick = {
-                        if (tA != null && tAl != null && tF != null && tG != null &&
-                            tG > 0f && tA > 2 * tG && tF > 0f && tB >= 0 &&
-                            tAl > 2 * tG + tB * tG
-                        ) {
-                            aplicarPlantilla(plantillaEstanteria(tA, tAl, tF, tG, tB))
-                        }
-                    },
+                    onClick = { aplicarPlantillaSegura("estanteria") },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Estantería")
                 }
                 Button(
-                    onClick = {
-                        if (tA != null && tAl != null && tF != null && tG != null &&
-                            tG > 0f && tA > 5f && tF > 5f && tAl > tG
-                        ) {
-                            aplicarPlantilla(plantillaMesa(tA, tF, tAl, tG))
-                        }
-                    },
+                    onClick = { aplicarPlantillaSegura("mesa") },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Mesa")
                 }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Button(
+                    onClick = { aplicarPlantillaSegura("banco") },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Banco")
+                }
+                Button(
+                    onClick = { aplicarPlantillaSegura("mesa_noche") },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Mesa de noche")
+                }
+            }
+            if (mensajePlantilla.isNotBlank()) {
+                Text(
+                    mensajePlantilla,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (mensajePlantilla == "Plantilla aplicada") {
+                        Color.Unspecified
+                    } else {
+                        Color(0xFFD32F2F)
+                    }
+                )
             }
         }
 
@@ -954,9 +1045,6 @@ fun DisenoMueblesScreen() {
             )
         }
 
-        item {
-            InstruccionesMontaje(piezas.toList())
-        }
         item {
             Text(
                 "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³  ·  " +
