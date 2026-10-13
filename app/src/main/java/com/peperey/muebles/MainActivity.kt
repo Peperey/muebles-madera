@@ -752,4 +752,124 @@ fun DisenoMueblesScreen() {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Mo
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedTextField(
+                    value = cantidad,
+                    onValueChange = { cantidad = it },
+                    label = { Text("Cantidad") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = { anadirPieza() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Añadir pieza")
+                }
+            }
+        }
+
+        item {
+            Text("Vista frontal (X · Y)", style = MaterialTheme.typography.titleSmall)
+            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+                dibujarProyeccion(
+                    proys = piezas.mapIndexed { i, p ->
+                        Proyeccion(
+                            h0 = p.x,
+                            h1 = p.x + p.dx,
+                            v0 = p.y,
+                            v1 = p.y + p.dy,
+                            conflicto = enConflicto[i],
+                            color = madera.color,
+                            texto = "${"%.0f".format(p.dx)} × ${"%.0f".format(p.dy)}"
+                        )
+                    },
+                    colorTexto = if (madera == Madera.NOGAL) {
+                        android.graphics.Color.WHITE
+                    } else {
+                        android.graphics.Color.BLACK
+                    }
+                )
+            }
+        }
+
+        item {
+            Text("Vista lateral (Z · Y)", style = MaterialTheme.typography.titleSmall)
+            Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+                dibujarProyeccion(
+                    proys = piezas.mapIndexed { i, p ->
+                        Proyeccion(
+                            h0 = p.z,
+                            h1 = p.z + p.dz,
+                            v0 = p.y,
+                            v1 = p.y + p.dy,
+                            conflicto = enConflicto[i],
+                            color = madera.color,
+                            texto = "${"%.0f".format(p.dz)} × ${"%.0f".format(p.dy)}"
+                        )
+                    },
+                    colorTexto = if (madera == Madera.NOGAL) {
+                        android.graphics.Color.WHITE
+                    } else {
+                        android.graphics.Color.BLACK
+                    }
+                )
+            }
+        }
+
+        item {
+            Text(
+                "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³  ·  " +
+                    "Coste: ${"%.2f".format(costeTotal)} €",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            if (numConflictos > 0) {
+                Text(
+                    "⚠ $numConflictos piezas se solapan (en rojo)",
+                    color = Color(0xFFD32F2F),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+        }
+
+        itemsIndexed(piezas) { indice, p ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(p.nombre, style = MaterialTheme.typography.titleSmall)
+                    Text("${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · ${p.cantidad} ud.")
+                    Text(
+                        "${p.orientacion.etiqueta} · X ${p.x}  Y ${p.y}  Z ${p.z} cm",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Coste: ${"%.2f".format(p.volumenM3 * madera.precioM3)} €",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (enConflicto[indice]) {
+                        Text(
+                            "Se solapa con otra pieza",
+                            color = Color(0xFFD32F2F),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+                OutlinedButton(onClick = { piezas.removeAt(indice) }) {
+                    Text("Quitar")
+                }
+            }
+        }
+
+        item {
+            if (piezas.isNotEmpty()) {
+                OutlinedButton(onClick = { piezas.clear() }) {
+                    Text("Borrar todo")
+                }
+            }
+        }
+    }
+}
