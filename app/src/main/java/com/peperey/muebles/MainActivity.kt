@@ -955,6 +955,9 @@ fun DisenoMueblesScreen() {
         }
 
         item {
+            InstruccionesMontaje(piezas.toList())
+        }
+        item {
             Text(
                 "Piezas: ${piezas.size}  ·  Volumen: ${"%.4f".format(volumenTotal)} m³  ·  " +
                     "Coste: ${"%.2f".format(costeTotal)} €",
