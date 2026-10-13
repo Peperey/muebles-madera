@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -253,15 +254,35 @@ fun DisenoMueblesScreen() {
                     size.height / altoMax,
                     (size.width - separacion * (piezas.size - 1)) / anchoTotal
                 )
+                val texto = android.graphics.Paint().apply {
+                    textSize = 28f
+                    isAntiAlias = true
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    color = if (madera == Madera.NOGAL) {
+                        android.graphics.Color.WHITE
+                    } else {
+                        android.graphics.Color.BLACK
+                    }
+                }
                 var x = 0f
                 piezas.forEach { p ->
                     val w = p.anchoCm * escala
                     val h = p.altoCm * escala
+                    val arriba = size.height - h
                     drawRect(
                         color = madera.color,
-                        topLeft = Offset(x, size.height - h),
+                        topLeft = Offset(x, arriba),
                         size = Size(w, h)
                     )
+                    // Solo escribe la medida si cabe dentro de la pieza
+                    if (w >= 70f && h >= 40f) {
+                        drawContext.canvas.nativeCanvas.drawText(
+                            "${"%.0f".format(p.anchoCm)} × ${"%.0f".format(p.altoCm)}",
+                            x + w / 2f,
+                            arriba + h / 2f + texto.textSize / 3f,
+                            texto
+                        )
+                    }
                     x += w + separacion
                 }
             }
