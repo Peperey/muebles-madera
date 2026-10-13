@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,9 +39,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -129,6 +136,83 @@ fun plantillaMesa(ancho: Float, fondo: Float, alto: Float, grosor: Float): List<
         Pieza("Pata 3", pata, alto - grosor, pata, 1, Orientacion.DE_PIE, 0f, 0f, fondo - pata),
         Pieza("Pata 4", pata, alto - grosor, pata, 1, Orientacion.DE_PIE, ancho - pata, 0f, fondo - pata)
     )
+}
+
+// Llama a la API de Groq y devuelve el texto de la respuesta. Se ejecuta en segundo plano.
+fun llamarGroq(clave: String, descripcion: String): String {
+    val sistema = """Eres un diseñador de muebles de madera. Responde SOLO con un array JSON, sin texto ni markdown. Cada elemento es una pieza con las claves: "nombre" (texto), "ancho", "alto", "grosor" (números en cm), "cantidad" (entero), "orientacion" ("DE_PIE", "DE_LADO" o "TUMBADA"), "x", "y", "z" (posición en cm de la esquina inferior izquierda de la pieza). Significado de la orientación: DE_PIE tiene ancho en X, alto en Y y grosor en Z. DE_LADO tiene grosor en X, alto en Y y ancho en Z. TUMBADA tiene ancho en X, grosor en Y y alto en Z. Las piezas no deben solaparse entre sí. Usa grosores de 1.8 a 2 cm para tableros. Todas las medidas son positivas."""
+
+    val cuerpo = JSONObject().apply {
+        put("model", "llama-3.3-70b-versatile")
+        put("temperature", 0.2)
+        put(
+            "messages",
+            JSONArray().apply {
+                put(JSONObject().put("role", "system").put("content", sistema))
+                put(JSONObject().put("role", "user").put("content", descripcion))
+            }
+        )
+    }
+
+    val conexion = URL("https://api.groq.com/openai/v1/chat/completions")
+        .openConnection() as HttpURLConnection
+    conexion.requestMethod = "POST"
+    conexion.setRequestProperty("Content-Type", "application/json")
+    conexion.setRequestProperty("Authorization", "Bearer $clave")
+    conexion.connectTimeout = 15000
+    conexion.readTimeout = 60000
+    conexion.doOutput = true
+    conexion.outputStream.use { it.write(cuerpo.toString().toByteArray(Charsets.UTF_8)) }
+
+    val codigo = conexion.responseCode
+    val texto = (if (codigo in 200..299) conexion.inputStream else conexion.errorStream)
+        .bufferedReader()
+        .use { it.readText() }
+    if (codigo !in 200..299) {
+        throw IllegalStateException("Error $codigo: $texto")
+    }
+    return JSONObject(texto)
+        .getJSONArray("choices")
+        .getJSONObject(0)
+        .getJSONObject("message")
+        .getString("content")
+}
+
+// Convierte la respuesta de la IA en una lista de piezas. Ignora piezas con medidas no válidas.
+fun interpretarPiezas(texto: String): List<Pieza> {
+    val inicio = texto.indexOf('[')
+    val fin = texto.lastIndexOf(']')
+    if (inicio < 0 || fin <= inicio) {
+        throw IllegalStateException("La respuesta no contiene una lista de piezas")
+    }
+    val array = JSONArray(texto.substring(inicio, fin + 1))
+    val lista = mutableListOf<Pieza>()
+    for (i in 0 until array.length()) {
+        val o = array.getJSONObject(i)
+        val a = o.optDouble("ancho", 0.0).toFloat()
+        val al = o.optDouble("alto", 0.0).toFloat()
+        val g = o.optDouble("grosor", 0.0).toFloat()
+        if (a <= 0f || al <= 0f || g <= 0f) continue
+        lista.add(
+            Pieza(
+                nombre = o.optString("nombre", "Pieza ${i + 1}"),
+                anchoCm = a,
+                altoCm = al,
+                grosorCm = g,
+                cantidad = o.optInt("cantidad", 1).coerceAtLeast(1),
+                orientacion = runCatching {
+                    Orientacion.valueOf(o.optString("orientacion", "DE_PIE"))
+                }.getOrDefault(Orientacion.DE_PIE),
+                x = o.optDouble("x", 0.0).toFloat(),
+                y = o.optDouble("y", 0.0).toFloat(),
+                z = o.optDouble("z", 0.0).toFloat()
+            )
+        )
+    }
+    if (lista.isEmpty()) {
+        throw IllegalStateException("No se obtuvieron piezas válidas")
+    }
+    return lista
 }
 
 data class Proyeccion(
@@ -255,9 +339,20 @@ fun cargarDiseno(context: Context): Pair<List<Pieza>, Madera> {
     }.getOrElse { emptyList<Pieza>() to Madera.PINO }
 }
 
+// La clave se guarda solo en el teléfono, en las preferencias de la app
+fun guardarClave(context: Context, clave: String) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putString("groq_key", clave)
+        .apply()
+}
+
+fun cargarClave(context: Context): String =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("groq_key", "") ?: ""
+
 @Composable
 fun DisenoMueblesScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val inicial = remember { cargarDiseno(context) }
     val piezas = remember { mutableStateListOf<Pieza>().apply { addAll(inicial.first) } }
     var madera by remember { mutableStateOf(inicial.second) }
@@ -275,6 +370,13 @@ fun DisenoMueblesScreen() {
     var tFondo by remember { mutableStateOf("") }
     var tGrosor by remember { mutableStateOf("") }
     var tBaldas by remember { mutableStateOf("3") }
+
+    // Estado de la IA
+    var clave by remember { mutableStateOf(cargarClave(context)) }
+    var descripcion by remember { mutableStateOf("") }
+    var propuesta by remember { mutableStateOf<List<Pieza>>(emptyList()) }
+    var estadoIA by remember { mutableStateOf("") }
+    var cargando by remember { mutableStateOf(false) }
 
     // Guarda el diseño cada vez que cambian las piezas o la madera
     LaunchedEffect(piezas.toList(), madera) {
@@ -331,6 +433,12 @@ fun DisenoMueblesScreen() {
     }
     val numConflictos = enConflicto.count { it }
 
+    // Piezas propuestas por la IA que chocan con el diseño actual o con otras propuestas
+    val todas = piezas + propuesta
+    val solapesPropuesta = propuesta.count { p ->
+        todas.any { q -> q !== p && seSolapan(p, q) }
+    }
+
     // Valores de las plantillas
     val tA = tAncho.replace(',', '.').toFloatOrNull()
     val tAl = tAlto.replace(',', '.').toFloatOrNull()
@@ -361,6 +469,107 @@ fun DisenoMueblesScreen() {
                 "${madera.etiqueta}: ${madera.precioM3.toInt()} € por m³ (precio de ejemplo)",
                 style = MaterialTheme.typography.bodySmall
             )
+        }
+
+        item {
+            Text("Diseño con IA", style = MaterialTheme.typography.titleSmall)
+            OutlinedTextField(
+                value = clave,
+                onValueChange = { clave = it },
+                label = { Text("Clave de Groq") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Button(
+                onClick = {
+                    guardarClave(context, clave.trim())
+                    estadoIA = "Clave guardada en el teléfono"
+                },
+                enabled = clave.isNotBlank()
+            ) {
+                Text("Guardar clave")
+            }
+            OutlinedTextField(
+                value = descripcion,
+                onValueChange = { descripcion = it },
+                label = { Text("Describe el mueble") },
+                placeholder = { Text("Ej.: estantería de 90 cm de ancho, 180 de alto, 30 de fondo, con 4 baldas") },
+                maxLines = 3,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Button(
+                onClick = {
+                    cargando = true
+                    estadoIA = "Pensando..."
+                    propuesta = emptyList()
+                    scope.launch {
+                        try {
+                            val texto = withContext(Dispatchers.IO) {
+                                llamarGroq(clave.trim(), descripcion.trim())
+                            }
+                            val lista = withContext(Dispatchers.Default) {
+                                interpretarPiezas(texto)
+                            }
+                            propuesta = lista
+                            estadoIA = "Propuesta: ${lista.size} piezas. Revísala antes de añadirla."
+                        } catch (e: Exception) {
+                            estadoIA = "Error: ${e.message ?: "desconocido"}"
+                        } finally {
+                            cargando = false
+                        }
+                    }
+                },
+                enabled = !cargando && clave.isNotBlank() && descripcion.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Generar propuesta")
+            }
+            if (estadoIA.isNotBlank()) {
+                Text(estadoIA, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        if (propuesta.isNotEmpty()) {
+            item {
+                Text("Propuesta de la IA", style = MaterialTheme.typography.titleSmall)
+                propuesta.forEach { p ->
+                    Text(
+                        "${p.nombre}: ${p.anchoCm} × ${p.altoCm} × ${p.grosorCm} cm · " +
+                            "${p.cantidad} ud. · ${p.orientacion.etiqueta} · " +
+                            "X ${p.x}  Y ${p.y}  Z ${p.z}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if (solapesPropuesta > 0) {
+                    Text(
+                        "⚠ $solapesPropuesta piezas propuestas se solapan con el diseño",
+                        color = Color(0xFFD32F2F),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = {
+                            piezas.addAll(propuesta)
+                            propuesta = emptyList()
+                            estadoIA = "Piezas añadidas al diseño"
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Añadir al diseño")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            propuesta = emptyList()
+                            estadoIA = "Propuesta descartada"
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Descartar")
+                    }
+                }
+            }
         }
 
         item {
